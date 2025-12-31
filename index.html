@@ -79,7 +79,7 @@
   <canvas id="c"></canvas>
   
   <!-- File Reader UI -->
-  <input type="file" id="fileInput" style="display:none;" accept=".txt,.html,.css,.js,.json,.md,.xml,.csv">
+  <input type="file" id="fileInput" style="display:none;" accept=".txt,.json,.md,.xml,.csv">
   <button id="fileBtn">📄 Đọc File</button>
   <div id="fileModal">
     <button id="closeModal">✕ Đóng</button>
@@ -1420,6 +1420,14 @@ fileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
   
+  // Validate file size (max 5MB)
+  const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+  if (file.size > maxSize) {
+    fileContent.innerHTML = `<p style="color:#ff3b30;">❌ File quá lớn. Vui lòng chọn file nhỏ hơn 5MB.</p>`;
+    fileModal.classList.add("show");
+    return;
+  }
+  
   const reader = new FileReader();
   reader.onload = (event) => {
     const content = event.target.result;
@@ -1430,7 +1438,7 @@ fileInput.addEventListener("change", (e) => {
     fileContent.innerHTML = `<p style="color:#ff3b30;">❌ Không thể đọc file. Vui lòng thử lại.</p>`;
     fileModal.classList.add("show");
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'UTF-8');
 });
 
 closeModal.addEventListener("click", () => {
