@@ -1448,9 +1448,9 @@ fileInput.addEventListener("change", (e) => {
   const reader = new FileReader();
   reader.onload = (event) => {
     const content = event.target.result;
-    // Reset style and clear content
+    // Reset style and clear content safely
     fileContent.style.color = '';
-    fileContent.innerHTML = '';
+    fileContent.textContent = '';
     
     // Create elements safely without innerHTML
     const heading = document.createElement('h3');
