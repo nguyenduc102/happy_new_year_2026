@@ -59,9 +59,11 @@ const hintEl = document.getElementById("hint");
 const warnEl = document.getElementById("warn");
 const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const FX_DENSITY = IS_MOBILE ? 0.72 : 1.05;  // mobile nhẹ hơn, desktop hơi dày hơn
-function dens(n){ return Math.max(1, Math.floor(n * FX_DENSITY)); }
+let qualityScale = 1;                        // auto hạ nếu tụt FPS
+function dens(n){ return Math.max(1, Math.floor(n * FX_DENSITY * qualityScale)); }
+const MAX_PARTICLES_CAP = IS_MOBILE ? 4500 : 14000;
 
-let W=0, H=0, DPR=1;
+let W=0, H=0, DPR=1, sizeK=1;
 function resize(){
   DPR = Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2);
   W = window.innerWidth;
@@ -71,6 +73,9 @@ function resize(){
   canvas.style.width = W + "px";
   canvas.style.height = H + "px";
   ctx.setTransform(DPR,0,0,DPR,0,0);
+  // Scale pháo hoa theo kích thước màn hình để luôn vừa mắt
+  const base = Math.min(W,H) / 900;
+  sizeK = clamp(base, IS_MOBILE ? 0.90 : 0.85, IS_MOBILE ? 1.10 : 1.25);
 }
 addEventListener("resize", resize, {passive:true});
 resize();
@@ -88,6 +93,32 @@ const music   = document.getElementById("music");
 const boom    = document.getElementById("boom");
 const whistle = document.getElementById("whistle");
 const crackle = document.getElementById("crackle");
+
+function makeAudioPool(el, size){
+  const pool=[];
+  for(let i=0;i<size;i++){
+    const a=new Audio(el.src);
+    a.preload="auto";
+    pool.push(a);
+  }
+  let idx=0;
+  return {
+    play(vol){
+      try {
+        const a=pool[idx];
+        idx=(idx+1)%pool.length;
+        a.pause();
+        a.currentTime=0;
+        a.volume=vol;
+        a.play();
+      } catch(e) {}
+    }
+  };
+}
+
+const boomPool    = makeAudioPool(boom, IS_MOBILE ? 3 : 6);
+const whistlePool = makeAudioPool(whistle, IS_MOBILE ? 3 : 5);
+const cracklePool = makeAudioPool(crackle, IS_MOBILE ? 2 : 4);
 
 function initAudio(){
   try {
@@ -122,27 +153,15 @@ function getBeat(){
 let lastBoomAt=0;
 function playBoom(vol=0.55){
   // boom.mp3 có thể không tồn tại → vẫn chạy
-  try {
-    const b = boom.cloneNode(true);
-    b.volume = vol;
-    b.play();
-  } catch(e) {}
+  boomPool.play(vol);
 }
 
 function playWhistle(vol=0.35){
-  try {
-    const w = whistle.cloneNode(true);
-    w.volume = vol;
-    w.play();
-  } catch(e) {}
+  whistlePool.play(vol);
 }
 
 function playCrackle(vol=0.25){
-  try {
-    const c = crackle.cloneNode(true);
-    c.volume = vol;
-    c.play();
-  } catch(e) {}
+  cracklePool.play(vol);
 }
 
 /* =========================================================
@@ -227,8 +246,9 @@ class Rocket {
     this.trail.push([this.x,this.y]);
     if(this.trail.length>18) this.trail.shift();
     // trail sparks
-    if(Math.random()<0.40){
-      particles.push(new Particle(this.x,this.y,rand(-0.35,0.35),rand(0.05,0.65),"#ffffff",1.3,0.8,0.55,1.2));
+    const trailProb = IS_MOBILE ? 0.24 : 0.40;
+    if(Math.random()<trailProb){
+      particles.push(new Particle(this.x,this.y,rand(-0.35,0.35),rand(0.05,0.65),"#ffffff",1.3,0.8,0.55,IS_MOBILE?1.0:1.2));
     }
     // explode
     if(this.y<=this.ty){
@@ -246,7 +266,7 @@ class Rocket {
       const t=i/this.trail.length;
       ctx.globalAlpha = 0.25*t;
       ctx.strokeStyle = this.c;
-      ctx.lineWidth = 2.2;
+      ctx.lineWidth = IS_MOBILE ? 1.6 : 2.2;
       ctx.beginPath();
       ctx.moveTo(p0[0],p0[1]);
       ctx.lineTo(p1[0],p1[1]);
@@ -255,7 +275,7 @@ class Rocket {
     // head
     ctx.globalAlpha=1;
     ctx.fillStyle=this.c;
-    ctx.shadowBlur=18;
+    ctx.shadowBlur= IS_MOBILE ? 10 : 18;
     ctx.shadowColor=this.c;
     ctx.beginPath();
     ctx.arc(this.x,this.y,2.4,0,Math.PI*2);
@@ -533,6 +553,7 @@ function explodeCurtain(x,y,scale,c){
 }
 
 function explodeByStyle(x,y,scale,c,style){
+  scale *= sizeK; // căn kích cỡ pháo theo màn hình
   const now=performance.now();
   if(now-lastBoomAt>120){
     playBoom(clamp(0.40+0.20*(scale-1),0.30,0.78));
@@ -815,9 +836,10 @@ function sampleImageToParticles(img){
   let step = small ? 3 : 2;                  // 2 = rất mịn, 3 = nhẹ hơn
   if(IS_MOBILE && step<3) step = 3;          // bớt dày trên mobile
 
-  const MAX = IS_MOBILE
+  const MAX_BASE = IS_MOBILE
     ? (small ? 15000 : 28000)
     : (small ? 22000 : 42000);               // giảm cap để mượt hơn khi vào ảnh
+  const MAX = Math.max(4000, Math.floor(MAX_BASE * qualityScale));
 
   let pts = [];
   for(let y=0; y<H; y+=step){
@@ -867,26 +889,26 @@ function sampleImageToParticles(img){
    SHOW SCRIPT (festival pacing)
 ========================================================= */
 const SCRIPT = {
-  act1End:   12000,  // thưa (12s)
-  act2End:   32000,  // dày (kéo dài hơn)
-  act3End:   44000,  // barrages (kéo dài hơn)
-  act4End:   52000,  // finale roll bắt đầu muộn hơn
-  textStart: 36000,  // bắt đầu text sớm hơn chút so với swirl
-  textLock:  43000,  // lock text
+  act1End:   18000,  // thưa lâu hơn (18s)
+  act2End:   34000,  // dày (16s)
+  act3End:   46000,  // barrages (12s)
+  act4End:   54000,  // finale roll
+  textStart: 38000,  // bắt đầu text
+  textLock:  45000,  // lock text
 
-  swirlStart: 44000, // swirl/heart bắt đầu sớm hơn
-  heartLock:  52000, // kết trái tim sớm hơn
-  heartHold:  61000, // giữ trái tim
+  swirlStart: 46000, // swirl/heart
+  heartLock:  54000, // kết trái tim
+  heartHold:  62000, // giữ trái tim
 
-  spiralStart: 60000,   // spiral sớm hơn một nhịp
-  toImageStart: 66000,  // vào transition sớm
-  toImageEnd:   69000,  // kết thúc transition nhanh (3s)
-  imageEnd:  72000,     // ảnh chỉ rõ trong ~3s
+  spiralStart: 62000,   // spiral
+  toImageStart: 66000,  // transition nhanh
+  toImageEnd:   69000,  // kết thúc transition (3s)
+  imageEnd:  72000,     // ảnh rõ ~3s
 
   mouseFireStart: 72000,  // vào cao trào sớm hơn
-  mouseFireEnd:   110000,  // cao trào dài hơn để bù thời gian
+  mouseFireEnd:   95000,  // rút ngắn phase chuột
 
-  newYearStart:   110500,  // hiện chữ chúc mừng
+  newYearStart:   95500,  // hiện chữ chúc mừng sớm hơn
   newYearEnd:     120000   // kết thúc (120s = 2 phút)
 };
 
@@ -988,10 +1010,22 @@ let startTime=0;
 let nextLaunchAt=0;
 let imageLoadedOnce=false;
 let pointerBurstAt=0;
+let lastFrameTime=0;
+let dtEMA=16;
 
 function tick(now){
   if(!running) return;
   const elapsed = now - startTime;
+
+   // Adaptive quality: đo FPS và hạ qualityScale khi khung hình chậm
+  if(lastFrameTime){
+    const dt = now - lastFrameTime;
+    dtEMA = dtEMA*0.9 + dt*0.1;
+    const targetQS = (dtEMA>22) ? 0.65 : (dtEMA>18 ? 0.82 : 1.0);
+    qualityScale += (targetQS - qualityScale)*0.05;
+    qualityScale = clamp(qualityScale, 0.6, 1.0);
+  }
+  lastFrameTime = now;
   const beat = getBeat();
 
   // background fade theo phase để tránh vệt/moire
@@ -1029,6 +1063,7 @@ function tick(now){
       if(elapsed>=SCRIPT.act2End && elapsed<SCRIPT.act3End) shots = (Math.random()<0.55)?2:3;
       if(elapsed>=SCRIPT.act3End) shots = 4 + ((Math.random()<0.45)?1:0); // hồi 3-4 dồn dập
       if(IS_MOBILE) shots = Math.max(1, Math.round(shots*0.7)); // giảm số rocket cho mobile
+      shots = Math.max(1, Math.round(shots * qualityScale));
 
       for(let i=0;i<shots;i++){
         launchRocket(clamp(power*rand(0.90,1.06),1.1,2.8), (Math.random()<0.22)?pickStyleForAct(elapsed):style);
@@ -1202,10 +1237,13 @@ function tick(now){
     ctx.restore();
 
     // bắn theo chuột, tần suất thưa hơn
-    if(pointer.moved && now - pointerBurstAt > 180){
+    if(pointer.moved && now - pointerBurstAt > 170){
       pointerBurstAt = now;
       pointer.moved = false;
-      const styles = ["curtain","willow","rain","double"];
+      const styles = [
+        "curtain","willow","rain","double","ring","flower",
+        "diamond","heartshape","starburst","spiral","bloom"
+      ];
       const style = styles[(Math.random()*styles.length)|0];
       const c = COLORS[(Math.random()*COLORS.length)|0];
       const scale = clamp(1.35 + beat*0.8, 1.2, 2.4);
@@ -1214,7 +1252,7 @@ function tick(now){
 
     // rocket rủ xuống ở xa, rất thưa
     if(Math.random() < 0.002){
-      const styles = ["curtain","willow"];
+      const styles = ["curtain","willow","spiral","ring"];
       launchRocket(1.4 + Math.random()*0.4, styles[(Math.random()*styles.length)|0]);
     }
   }
@@ -1267,8 +1305,9 @@ function tick(now){
     p.draw(1);
     return p.a>0;
   });
-  const cap = IS_MOBILE ? 5000 : 8000;
-  if(particles.length>cap) particles.splice(0, particles.length-cap);
+  if(particles.length>MAX_PARTICLES_CAP){
+    particles.splice(0, particles.length - MAX_PARTICLES_CAP);
+  }
 
   // end script loop (auto restart softly)
   if(elapsed > SCRIPT.newYearEnd + 1200){
@@ -1307,6 +1346,7 @@ async function startShow(){
     textAlpha=1; imageReady=false; imageLoadedOnce=false;
 
     startTime = performance.now();
+    lastFrameTime = startTime;
     nextLaunchAt = startTime + 200;
     running=true;
     requestAnimationFrame(tick);
