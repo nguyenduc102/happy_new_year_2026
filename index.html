@@ -636,97 +636,21 @@ let letterNextAt = 0;
 let letterHoldUntil = 0;
 let letterCacheCanvas = null; // finished letters cached here
 let letterCacheReady = false;
-let letterSeqDoneAt = 0;
-
-// After text: swirl->heart->vortex state
-let postTextStarted = false;
-let postTextT0 = 0;
-let postMorphDots = [];
-let postTargetsHeart = null;
-
-function buildHeartTargetsCentered(n){
-  const pts=[];
-  for(let i=0;i<n;i++){
-    const t=(i/n)*Math.PI*2;
-    const x=16*Math.pow(Math.sin(t),3);
-    const y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
-    pts.push([x,-y]);
-  }
-  let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
-  for(const [x,y] of pts){ minX=Math.min(minX,x); maxX=Math.max(maxX,x); minY=Math.min(minY,y); maxY=Math.max(maxY,y); }
-  const w=maxX-minX, h=maxY-minY;
-  const s = Math.min(W/(w*2.2), H/(h*2.2));
-  const cx=W/2, cy=H/2;
-  return pts.map(([x,y])=>[cx+(x-(minX+w/2))*s, cy+(y-(minY+h/2))*s]);
-}
-
-function initPostTextMorphDots(count){
-  postMorphDots = [];
-  const n = Math.max(160, Math.min(count, isLowEndNow()?260:420));
-  // seed around center in a ring
-  for(let i=0;i<n;i++){
-    const a = (i/n)*Math.PI*2;
-    const r = Math.min(W,H) * (0.18 + Math.random()*0.14);
-    const x = W/2 + Math.cos(a)*r;
-    const y = H/2 + Math.sin(a)*r;
-    postMorphDots.push(new MorphDot(x,y,'#ff69b4'));
-  }
-  postTargetsHeart = buildHeartTargetsCentered(postMorphDots.length);
-}
-
-function startPostTextSequence(now){
-  postTextStarted = true;
-  postTextT0 = now;
-  initPostTextMorphDots(380);
-}
-
-function drawLetterCache(alpha=1){
-  if(!letterCacheReady || !letterCacheCanvas) return;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(letterCacheCanvas, 0, 0, letterCacheCanvas.width, letterCacheCanvas.height, 0, 0, W, H);
-  ctx.restore();
-}
 
 class LetterDot {
-  constructor(x,y,tx,ty,c,vx=0,vy=0){
+  constructor(x,y,tx,ty,c){
     this.x=x; this.y=y; this.tx=tx; this.ty=ty;
-    this.vx=vx; this.vy=vy;
+    this.vx=rand(-3,3); this.vy=rand(-3,3);
     this.c=c;
     this.a=0;
-    this.t=0;
-
-    // 2-phase motion: small outward flight, then converge
-    // Longer flight so it reads like "tia bay ra" before being pulled into the glyph
-    this.outDur = isLowEndNow() ? 160 : 230; // ms
   }
-  update(dt=16){
-    this.t += dt;
-
-    if(this.t < this.outDur){
-      // outward flight: keep velocity, add light drag
-      // softer glide
-      this.vx *= 0.992;
-      this.vy *= 0.992;
-      this.x += this.vx;
-      this.y += this.vy;
-      this.a = Math.min(1, this.a + 0.045);
-      return;
-    }
-
-    // converge: stronger spring so it "pulls" into the glyph
+  update(){
     const dx=this.tx-this.x, dy=this.ty-this.y;
-    // ease-in the pull during the first ~120ms after outward phase ends
-    const tPull = Math.min(1, (this.t - this.outDur) / 120);
-    const kBase = isLowEndNow() ? 0.026 : 0.032;
-    const k = kBase * (0.65 + 0.35*tPull);
-    const damp = 0.82;
-    this.vx = (this.vx + dx*k)*damp;
-    this.vy = (this.vy + dy*k)*damp;
+    this.vx = (this.vx + dx*0.030)*0.82;
+    this.vy = (this.vy + dy*0.030)*0.82;
     this.x += this.vx;
     this.y += this.vy;
-    this.a = Math.min(1, this.a + 0.045);
+    this.a = Math.min(1, this.a + 0.04);
   }
   draw(alpha=1){
     const aa = this.a*alpha;
@@ -832,7 +756,6 @@ function stepLetterSequence(now){
   if(!letterDotsReady && now >= letterNextAt){
     if(letterSeqIndex >= letters.length){
       // done
-      if(!letterSeqDoneAt) letterSeqDoneAt = now;
       return;
     }
 
@@ -859,25 +782,20 @@ function stepLetterSequence(now){
 
     letterActiveDots = [];
     for(const [tx,ty] of use){
-      // spawn from exact explosion core + initial outward velocity (spark ray)
+      // start around burst area
       const ang = Math.random()*Math.PI*2;
-      // slightly lower base speed + wider variance = smoother "rays"
-      const spd = (isLowEndNow()? 3.2 : 4.6) * (0.65 + Math.random()*0.85);
-      const vx = Math.cos(ang) * spd;
-      const vy = Math.sin(ang) * spd;
-      const jx = rand(-1.4, 1.4);
-      const jy = rand(-1.4, 1.4);
-      letterActiveDots.push(new LetterDot(lx + jx, y + jy, tx, ty, c, vx, vy));
+      const r = 10 + Math.random()*60;
+      const x = lx + Math.cos(ang)*r;
+      const yy = y + Math.sin(ang)*r;
+      letterActiveDots.push(new LetterDot(x,yy,tx,ty,c));
     }
     letterDotsReady = true;
-    // a bit longer so the "pull" is visible after outward flight
-    letterHoldUntil = now + (isLowEndNow()?480:620);
+    letterHoldUntil = now + (isLowEndNow()?420:520);
   }
 
   // animate active letter dots
   if(letterDotsReady && letterActiveDots.length){
-    const dt = Math.min(34, now - lastFrameTime);
-    for(const d of letterActiveDots){ d.update(dt); d.draw(1); }
+    for(const d of letterActiveDots){ d.update(); d.draw(1); }
     // once hold time passed, cache into letterCacheCanvas and move on
     if(now >= letterHoldUntil){
       cacheCurrentLetterDots();
@@ -986,8 +904,6 @@ let morphCached = false;
 
 // Ultra-simple mode (for very weak PCs): use static heart + direct image draw (no particles)
 const ULTRA_SIMPLE = true;
-// Absolute-low-end mode: show a static heart (no morph simulation at all)
-const HEART_STATIC_ONLY = true;
 let offscreenHeartCanvas = null;
 let heartSimpleReady = false;
 
@@ -1009,8 +925,7 @@ function buildSimpleHeartCanvas(){
   g.translate(cx, cy);
   g.beginPath();
   // param heart curve
-  // minimal steps: fastest possible while still looking like a heart
-  const steps = 90;
+  const steps = 220;
   for(let i=0;i<=steps;i++){
     const t = (i/steps) * Math.PI * 2;
     const x = 16*Math.pow(Math.sin(t),3);
@@ -1022,9 +937,28 @@ function buildSimpleHeartCanvas(){
   }
   g.closePath();
 
-  // solid fill only (no gradients/strokes) => cheapest to render/cache
-  g.fillStyle = '#ff4fa6';
+  // Fill with radial gradient for nicer depth
+  const grd = g.createRadialGradient(0, -s*0.15, s*0.10, 0, s*0.12, s*1.05);
+  grd.addColorStop(0, 'rgba(255, 210, 235, 0.98)');
+  grd.addColorStop(0.35, 'rgba(255, 90, 165, 0.95)');
+  grd.addColorStop(1, 'rgba(210, 40, 120, 0.95)');
+  g.fillStyle = grd;
   g.fill();
+
+  // subtle inner highlight stroke
+  g.lineWidth = 2;
+  g.strokeStyle = 'rgba(255, 235, 245, 0.70)';
+  g.stroke();
+
+  // soft outer glow via blur shadow (only once, cached)
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  g.shadowBlur = 18;
+  g.shadowColor = 'rgba(255, 80, 160, 0.65)';
+  g.lineWidth = 3;
+  g.strokeStyle = 'rgba(255, 120, 190, 0.28)';
+  g.stroke();
+  g.restore();
 
   g.restore();
   offscreenHeartCanvas = c;
@@ -1033,11 +967,25 @@ function buildSimpleHeartCanvas(){
 
 function drawHeartSimpleFX(now, alpha=1){
   if(!offscreenHeartCanvas) return;
-
-  // Simplest possible: just draw the cached heart (no rotate/scale each frame)
+  // gentle pulse
+  const pulse = 1 + 0.03*Math.sin(now*0.0032);
   ctx.save();
   ctx.globalAlpha = alpha;
+  ctx.translate(W/2, H/2);
+  ctx.scale(pulse, pulse);
+  ctx.translate(-W/2, -H/2);
   ctx.drawImage(offscreenHeartCanvas, 0, 0, offscreenHeartCanvas.width, offscreenHeartCanvas.height, 0, 0, W, H);
+
+  // tiny shimmer band (very light)
+  const shimmer = 0.20 + 0.20*Math.sin(now*0.0022);
+  const bandY = H*0.42 + (H*0.06)*Math.sin(now*0.0016);
+  const g = ctx.createLinearGradient(0, bandY-32, 0, bandY+32);
+  g.addColorStop(0, 'rgba(255,255,255,0)');
+  g.addColorStop(0.5, `rgba(255,255,255,${0.10*shimmer})`);
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = g;
+  ctx.fillRect(0, bandY-40, W, 80);
   ctx.restore();
 }
 
@@ -1550,55 +1498,6 @@ function tick(now){
   if(LETTER_MODE){
     // firework→letter sequence
     if(textStarted && textAlpha>0.01) stepLetterSequence(now);
-
-    // After full "Vân Hà": hold 2s, then swirl->heart 3s, then vortex until toImageStart
-    if(letterSeqDoneAt){
-      const hold2s = 2000;
-      const heart3s = 3000;
-      const tDone = now - letterSeqDoneAt;
-
-      // 1) Hold full text for 2 seconds
-      if(tDone < hold2s){
-        drawLetterCache(1);
-      } else {
-        if(!postTextStarted) startPostTextSequence(now);
-        const t2 = tDone - hold2s;
-
-        // 2) Swirl dots into a heart over 3 seconds
-        if(t2 < heart3s){
-          // fade out cached text
-          const aText = 1 - clamp(t2/600, 0, 1);
-          if(aText>0.01) drawLetterCache(aText);
-
-          const k = clamp(t2/heart3s, 0, 1);
-          const rot = 0.25 + (1-k)*0.85;
-          const swirl = (1-k) * Math.min(W,H) * 0.06;
-          for(let i=0;i<postMorphDots.length;i++){
-            const d = postMorphDots[i];
-            // set heart targets gradually
-            const [tx,ty] = postTargetsHeart[i];
-            d.setTarget(tx,ty);
-            // swirl motion while converging
-            d.updateRotate(rot, 1 - 0.32*k);
-            d.updateToTarget(0.020, 0.86);
-            d.draw(1, swirl);
-          }
-        } else {
-          // 3) Vortex swirl until toImageStart
-          const untilImage = Math.max(600, SCRIPT.toImageStart - SCRIPT.textStart - hold2s - heart3s);
-          const k3 = clamp((t2 - heart3s)/untilImage, 0, 1);
-          const rot = 0.22 + 0.38*(1-k3);
-          const shrink = 1 - 0.55*k3;
-          const swirl = (1-k3) * Math.min(W,H) * 0.03;
-          for(const d of postMorphDots){
-            d.updateRotate(rot, shrink);
-            d.updateToTarget(0.012, 0.90);
-            d.draw(1, swirl);
-          }
-          // Hand off to heart/image transition naturally when elapsed hits toImageStart
-        }
-      }
-    }
   } else if(textParticles.length && textAlpha>0.01){
     for(const tp of textParticles){ tp.update(); tp.draw(textAlpha); }
     // twinkle subtle (reduced frequency to save performance)
@@ -1611,9 +1510,6 @@ function tick(now){
 
   // 3) Start morph from text at swirlStart
   if(elapsed >= SCRIPT.swirlStart && !morphStarted && textParticles.length){
-    if(LETTER_MODE) {
-      // letter-mode uses its own post-text morph pipeline
-    } else
     if(!ULTRA_SIMPLE){
       startMorphFromText();
       morphStarted = true;
@@ -1630,16 +1526,9 @@ function tick(now){
     if(ULTRA_SIMPLE){
       if(!heartSimpleReady) buildSimpleHeartCanvas();
 
-      // Absolute-low-end: always show static heart and skip any morphDot heart logic
-      if(HEART_STATIC_ONLY){
-        if(elapsed < SCRIPT.toImageStart && !(LETTER_MODE && letterSeqDoneAt)){
-          drawHeartSimpleFX(now, 1);
-        }
-      } else {
-        // During "heart" and "spiral" ranges just show the static heart
-        if(elapsed < SCRIPT.toImageStart && !(LETTER_MODE && letterSeqDoneAt)){
-          drawHeartSimpleFX(now, 1);
-        }
+      // During "heart" and "spiral" ranges just show the static heart
+      if(elapsed < SCRIPT.toImageStart){
+        drawHeartSimpleFX(now, 1);
       }
     } else {
     if(elapsed < SCRIPT.heartLock){
@@ -1756,11 +1645,74 @@ function tick(now){
       })();
     }
 
-    // Simplest: fade out heart (no split/gather, no sparkles/vignette)
+    // Enhanced transition background effect
+    if(eased > 0.1){
+      ctx.fillStyle = `rgba(255,200,220,${Math.pow(eased,2)*0.05})`;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // ULTRA SIMPLE: add a cheap vignette + a few sparkles (no particles)
+    if(ULTRA_SIMPLE){
+      const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.10, W/2, H/2, Math.min(W,H)*0.72);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, `rgba(0,0,0,${0.35*eased})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0,0,W,H);
+
+      if(t < 0.75){
+        const n = 8;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.25*(1-eased);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        for(let i=0;i<n;i++){
+          const a = (i/n)*Math.PI*2 + now*0.0008;
+          const r = Math.min(W,H) * (0.08 + 0.10*eased);
+          const x = W/2 + Math.cos(a) * r;
+          const y = H/2 + Math.sin(a) * r;
+          ctx.beginPath();
+          ctx.arc(x,y, 1.2 + 1.6*(1-eased), 0, Math.PI*2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    // fade-out heart/morph
     if(ULTRA_SIMPLE){
       const outA = 1 - eased;
-      if(outA > 0.01){
-        drawHeartSimpleFX(now, outA);
+      if(offscreenHeartCanvas && outA > 0.01){
+        // Spin + split-out early, then gather back while fading
+        const spin = (1-eased) * 0.55; // radians
+        const split = (1 - eased) * Math.min(W,H) * 0.07;
+        const gather = eased; // 0..1
+        const dx = split * (1 - gather);
+
+        ctx.save();
+        ctx.globalAlpha = outA;
+        ctx.translate(W/2, H/2);
+        ctx.rotate(spin);
+        ctx.translate(-W/2, -H/2);
+
+        // draw left half
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, W/2, H);
+        ctx.clip();
+        ctx.translate(-dx, 0);
+        drawHeartSimpleFX(now, 1);
+        ctx.restore();
+
+        // draw right half
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(W/2, 0, W/2, H);
+        ctx.clip();
+        ctx.translate(dx, 0);
+        drawHeartSimpleFX(now, 1);
+        ctx.restore();
+
+        ctx.restore();
       }
     } else {
       // original morph fade
@@ -1785,25 +1737,75 @@ function tick(now){
       }
     }
 
-    // Simplest image: draw the real image directly (no particles, no extra transforms)
+    // keep some soft fireworks in background with variety (skip on low-end)
+    if(!isLowEndNow() && Math.random() < 0.008){
+      const styles = ["heartshape", "starburst", "diamond"];
+      launchRocket(1.2, styles[(Math.random()*styles.length)|0]);
+    }
+
+    // fade-in image: ULTRA SIMPLE draws the real image directly (no particles)
     if(ULTRA_SIMPLE){
       if(uploadedImage){
-        drawContainedImage(ctx, uploadedImage, eased);
-      } else {
-        // placeholder so weak machines still show something
+        // small zoom-in for nicer transition but still very cheap
+        const z = 1 + 0.04*eased;
         ctx.save();
-        ctx.globalAlpha = eased;
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
-        const w = Math.min(W*0.72, 520);
-        const h = Math.min(H*0.40, 260);
-        ctx.fillRect((W-w)/2, (H-h)/2, w, h);
-        ctx.fillStyle = 'rgba(255,255,255,0.45)';
-        ctx.font = `600 ${Math.max(14, Math.floor(Math.min(W,H)*0.032))}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('Ảnh không tải được', W/2, H/2);
+        ctx.translate(W/2, H/2);
+        ctx.scale(z, z);
+        ctx.translate(-W/2, -H/2);
+        drawContainedImage(ctx, uploadedImage, eased);
         ctx.restore();
       }
+    } else if(imageReady){
+      // build particles progressively to avoid a single-frame freeze
+      if(!imageBuildDone) buildImageParticlesChunk(isLowEndNow() ? 320 : 900);
+    }
+    if(!ULTRA_SIMPLE && imageReady && imageParticles.length){
+      const rot = (1-eased)*0.30;
+      ctx.save();
+      ctx.translate(W/2, H/2);
+      ctx.rotate(rot);
+      ctx.translate(-W/2, -H/2);
+
+      const nowSim = performance.now();
+      // While within short simulation window, update particles for convergence
+      if(nowSim < imageSimUntil){
+        if(isLowEndNow()){
+          // Update a subset each frame to limit CPU spikes
+          const stride = 2;
+          for(let i=0;i<imageParticles.length;i+=stride){ imageParticles[i].update(); imageParticles[i].draw(eased); }
+        } else {
+          for(const p of imageParticles){ p.update(); p.draw(eased); }
+        }
+      } else {
+        // Once simulation finished, draw cached offscreen image if available
+        if(offscreenImageCanvas && offscreenImageCanvas._cached){
+          // draw pre-rendered image (offscreen stored in device pixels)
+          ctx.drawImage(offscreenImageCanvas, 0, 0, offscreenImageCanvas.width, offscreenImageCanvas.height, 0, 0, W, H);
+        } else {
+          // First time caching: render current particle state to offscreen then flag cached
+          try {
+            const oc = offscreenImageCanvas;
+            const octx = oc.getContext('2d');
+            // clear high-dpi offscreen and draw black background
+            octx.setTransform(1,0,0,1,0,0);
+            octx.fillStyle = '#000';
+            octx.fillRect(0,0,oc.width,oc.height);
+            // draw particles scaled to device pixels
+            octx.save();
+            octx.scale(DPR, DPR);
+            for(const p of imageParticles){ p.drawTo(octx, 1); }
+            octx.restore();
+            offscreenImageCanvas._cached = true;
+            // draw it to main canvas now
+            ctx.drawImage(offscreenImageCanvas, 0, 0, offscreenImageCanvas.width, offscreenImageCanvas.height, 0, 0, W, H);
+          } catch(e){
+            // fallback to per-particle drawing if offscreen fails
+            for(const p of imageParticles){ p.update(); p.draw(eased); }
+          }
+        }
+      }
+
+      ctx.restore();
     }
   }
 
@@ -1812,21 +1814,27 @@ function tick(now){
     // clear morphDots when image fully displays to save performance
     if(morphDots.length) morphDots = [];
 
-    // Simplest hold: just draw the image (or placeholder)
-    if(uploadedImage){
-      drawContainedImage(ctx, uploadedImage, 1);
-    } else {
-      ctx.save();
-      ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      const w = Math.min(W*0.72, 520);
-      const h = Math.min(H*0.40, 260);
-      ctx.fillRect((W-w)/2, (H-h)/2, w, h);
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      ctx.font = `600 ${Math.max(14, Math.floor(Math.min(W,H)*0.032))}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('Ảnh không tải được', W/2, H/2);
-      ctx.restore();
+    if(ULTRA_SIMPLE){
+      if(uploadedImage) drawContainedImage(ctx, uploadedImage, 1);
+    } else if(imageReady){
+      if(!imageBuildDone) buildImageParticlesChunk(isLowEndNow() ? 320 : 900);
+    }
+    if(!ULTRA_SIMPLE && imageReady && imageParticles.length){
+      const nowSim2 = performance.now();
+      if(nowSim2 < imageSimUntil){
+        // continue simulating until short window ends
+        for(const p of imageParticles){ p.update(); p.draw(1); }
+      } else if(offscreenImageCanvas && offscreenImageCanvas._cached){
+        // draw cached final image at full alpha
+        ctx.drawImage(offscreenImageCanvas, 0, 0, offscreenImageCanvas.width, offscreenImageCanvas.height, 0, 0, W, H);
+      } else {
+        // fallback
+        for(const p of imageParticles){ p.update(); p.draw(1); }
+      }
+    }
+    // subtle fireworks overlay (very light, reduced frequency)
+    if(elapsed >= SCRIPT.toImageEnd + 1400 && Math.random() < 0.0015){
+      launchRocket(1.05, "willow");
     }
   }
 
@@ -1925,21 +1933,25 @@ function tick(now){
   morphCached = false;
   offscreenHeartCanvas = null;
   heartSimpleReady = false;
-
-    // reset letter sequence / post-text choreography
-    letterSeqStarted = false;
-    letterSeqIndex = 0;
-    letterActiveDots = [];
-    letterDotsReady = false;
-    letterNextAt = 0;
-    letterHoldUntil = 0;
-    letterCacheCanvas = null;
-    letterCacheReady = false;
-    letterSeqDoneAt = 0;
-    postTextStarted = false;
-    postTextT0 = 0;
-    postMorphDots = [];
-    postTargetsHeart = null;
+  letterSeqStarted = false;
+  letterSeqIndex = 0;
+  letterActiveDots = [];
+  letterDotsReady = false;
+  letterNextAt = 0;
+  letterHoldUntil = 0;
+  letterCacheCanvas = null;
+  letterCacheReady = false;
+  // reset letter sequence
+  letterSeqStarted = false;
+  letterSeqIndex = 0;
+  letterActiveDots = [];
+  letterDotsReady = false;
+  letterNextAt = 0;
+  letterHoldUntil = 0;
+  letterCacheCanvas = null;
+  letterCacheReady = false;
+  offscreenHeartCanvas = null;
+  heartSimpleReady = false;
     startTime = performance.now();
     nextLaunchAt = startTime + 250;
   }
@@ -1977,21 +1989,6 @@ async function startShow(){
   imageBuildDone = false;
   offscreenMorphCanvas = null;
   morphCached = false;
-
-    // reset letter sequence / post-text choreography
-    letterSeqStarted = false;
-    letterSeqIndex = 0;
-    letterActiveDots = [];
-    letterDotsReady = false;
-    letterNextAt = 0;
-    letterHoldUntil = 0;
-    letterCacheCanvas = null;
-    letterCacheReady = false;
-    letterSeqDoneAt = 0;
-    postTextStarted = false;
-    postTextT0 = 0;
-    postMorphDots = [];
-    postTargetsHeart = null;
 
     startTime = performance.now();
     lastFrameTime = startTime;
