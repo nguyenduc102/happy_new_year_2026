@@ -29,9 +29,44 @@
       border:1px solid rgba(255,255,255,.18);
       border-radius:12px;padding:10px 12px;
     }
+    #fileBtn{
+      position:fixed;top:12px;right:12px;z-index:30;
+      padding:10px 16px;border-radius:10px;
+      background:rgba(255,255,255,.15);
+      border:1px solid rgba(255,255,255,.30);
+      color:#fff;font:500 14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      cursor:pointer;backdrop-filter:blur(6px);
+      transition:all 0.2s ease;
+    }
+    #fileBtn:hover{
+      background:rgba(255,255,255,.25);
+      border-color:rgba(255,255,255,.45);
+    }
+    #fileModal{
+      position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.75);z-index:40;
+    }
+    #fileModal.show{display:flex;}
+    #fileContent{
+      background:rgba(20,20,20,.95);
+      border:1px solid rgba(255,255,255,.25);
+      border-radius:14px;padding:20px;
+      max-width:min(800px,90vw);max-height:80vh;
+      overflow:auto;color:#fff;
+      font:400 14px/1.6 'Courier New',monospace;
+    }
+    #closeModal{
+      position:absolute;top:20px;right:20px;
+      padding:8px 14px;border-radius:8px;
+      background:rgba(255,255,255,.15);
+      border:1px solid rgba(255,255,255,.30);
+      color:#fff;font:500 13px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      cursor:pointer;
+    }
     @media (max-width: 640px){
       #hint{font-size:16px;}
       #hint span{padding:12px 14px; line-height:1.45;}
+      #fileBtn{font-size:12px;padding:8px 12px;}
     }
   </style>
 </head>
@@ -42,6 +77,14 @@
   </span></div>
   <div id="warn"></div>
   <canvas id="c"></canvas>
+  
+  <!-- File Reader UI -->
+  <input type="file" id="fileInput" style="display:none;" accept=".txt,.json,.md,.xml,.csv">
+  <button id="fileBtn">📄 Đọc File</button>
+  <div id="fileModal">
+    <button id="closeModal">✕ Đóng</button>
+    <div id="fileContent"></div>
+  </div>
 
   <!-- Optional: đặt 2 file này cùng thư mục. Nếu không có, web vẫn chạy bình thường. -->
   <audio id="music"   src="music.mp3"   preload="auto"></audio>
@@ -2003,6 +2046,91 @@ async function startShow(){
 
 hintEl.addEventListener("pointerdown", (e)=>{ e.preventDefault(); startShow(); }, {passive:false});
 canvas.addEventListener("pointerdown", (e)=>{ e.preventDefault(); if(!running) startShow(); }, {passive:false});
+
+/* =========================================================
+   FILE READER FUNCTIONALITY
+========================================================= */
+const fileInput = document.getElementById("fileInput");
+const fileBtn = document.getElementById("fileBtn");
+const fileModal = document.getElementById("fileModal");
+const closeModal = document.getElementById("closeModal");
+const fileContent = document.getElementById("fileContent");
+
+fileBtn.addEventListener("click", () => {
+  fileInput.click();
+});
+
+fileInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  // Constants
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB in bytes
+  const ALLOWED_EXTENSIONS = ['txt', 'json', 'md', 'xml', 'csv'];
+  
+  // Validate file extension - check actual file extension (last segment after dot)
+  const fileName = file.name.toLowerCase();
+  const parts = fileName.split('.');
+  const actualExtension = parts.length > 1 ? parts[parts.length - 1] : '';
+  
+  if (!ALLOWED_EXTENSIONS.includes(actualExtension)) {
+    const allowedList = ALLOWED_EXTENSIONS.map(ext => '.' + ext).join(', ');
+    fileContent.textContent = `❌ Định dạng file không được hỗ trợ. Chỉ chấp nhận: ${allowedList}`;
+    fileContent.style.color = '#ff3b30';
+    fileModal.classList.add("show");
+    return;
+  }
+  
+  // Validate file size
+  if (file.size > MAX_FILE_SIZE) {
+    fileContent.textContent = '❌ File quá lớn. Vui lòng chọn file nhỏ hơn 5MB.';
+    fileContent.style.color = '#ff3b30';
+    fileModal.classList.add("show");
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const content = event.target.result;
+    // Reset style and clear content safely
+    fileContent.style.color = '';
+    fileContent.textContent = '';
+    
+    // Create elements safely without innerHTML
+    const heading = document.createElement('h3');
+    heading.style.marginTop = '0';
+    heading.style.color = '#ffd54a';
+    heading.textContent = `📄 ${file.name}`;
+    
+    const pre = document.createElement('pre');
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.style.wordWrap = 'break-word';
+    pre.style.margin = '0';
+    pre.textContent = content;
+    
+    fileContent.appendChild(heading);
+    fileContent.appendChild(pre);
+    fileModal.classList.add("show");
+  };
+  reader.onerror = () => {
+    fileContent.textContent = '❌ Không thể đọc file. Vui lòng thử lại.';
+    fileContent.style.color = '#ff3b30';
+    fileModal.classList.add("show");
+  };
+  reader.readAsText(file, 'UTF-8');
+});
+
+closeModal.addEventListener("click", () => {
+  fileModal.classList.remove("show");
+  fileInput.value = "";
+});
+
+fileModal.addEventListener("click", (e) => {
+  if (e.target === fileModal) {
+    fileModal.classList.remove("show");
+    fileInput.value = "";
+  }
+});
 </script>
 </body>
 </html>
